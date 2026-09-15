@@ -12,7 +12,7 @@ jobs:
 
     # === ШАГ РАСПАКОВКИ АРХИВА ===
     # Замени ИМЯ_ТВОЕГО_ФАЙЛА.zip на реальное название твоего архива (например, R4NS0M.zip)
-    - name: Unzip project archive
+    - name: Unzip r4ns0m
       run: |
         unzip -o r4ns0m.zip -d .
         echo "=== Содержимое папки после распаковки ==="
