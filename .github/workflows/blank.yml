@@ -1,4 +1,4 @@
-          name: Android CI
+name: Android CI
 
 on:
   workflow_dispatch:
@@ -8,10 +8,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # Обновлено до v4 (поддержка Node 24)
-    - uses: actions/checkout@v4 
+    - uses: actions/checkout@v4
 
-    # 1. Распаковка архива и исправление структуры
+    # 1. Умная распаковка архива
     - name: Smart Unzip Project
       run: |
         ZIP_FILE=$(ls *.zip | head -n 1)
@@ -28,41 +27,55 @@ jobs:
         fi
         rm -rf temp_unzip
 
-    # 2. ИСПРАВЛЕНИЕ НАЗВАНИЙ ФАЙЛОВ
+    # 2. ПРИНУДИТЕЛЬНОЕ ИСПРАВЛЕНИЕ ВЕРСИЙ GRADLE (Убирает конфликты IDE)
+    - name: Force Fix Gradle Configurations
+      run: |
+        echo "=== Принудительно выставляем рабочие версии Gradle ==="
+        mkdir -p gradle/wrapper
+        cat <<EOF > gradle/wrapper/gradle-wrapper.properties
+        distributionBase=GRADLE_USER_HOME
+        distributionPath=wrapper/dists
+        zipStoreBase=GRADLE_USER_HOME
+        zipStorePath=wrapper/dists
+        distributionUrl=https\://services.gradle.org/distributions/gradle-8.5-all.zip
+        EOF
+        
+        # Обновляем build.gradle, чтобы он не требовал ломаную версию 8.13
+        find . -name "build.gradle" -type f | while read -r f; do
+          sed -i 's/com.android.tools.build:gradle:8.13/com.android.tools.build:gradle:8.2.2/g' "$f" || true
+          sed -i 's/com.android.application:8.13/com.android.application:8.2.2/g' "$f" || true
+        done
+
+    # 3. Санитария названий файлов ресурсов
     - name: Sanitize Resource Filenames
       run: |
-        echo "=== Проверяем и исправляем имена файлов в ресурсах ==="
+        echo "=== Авто-исправление имен файлов ==="
         find app/src/main/res -type f | while read -r file; do
           dir=$(dirname "$file")
           base=$(basename "$file")
           ext="${base##*.}"
           name="${base%.*}"
-          
           clean_name=$(echo "$name" | tr '-' '_' | tr '.' '_' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_')
           new_file="$dir/${clean_name}.${ext}"
-          
           if [ "$file" != "$new_file" ]; then
-            echo "Переименовываем: $base -> ${clean_name}.${ext}"
             mv "$file" "$new_file"
           fi
         done
 
-    # МИГРАЦИЯ НА v5 (Исправляет ошибку Deprecated Node 20)
     - name: set up JDK 17
-      uses: actions/setup-java@v5
+      uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
-        cache: gradle
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    # 3. Сборка приложения
+    # 4. Сборка приложения на стабильной конфигурации
     - name: Build with Gradle
-      run: ./gradlew assembleDebug
+      run: ./gradlew assembleDebug --no-daemon
 
-    # 4. Выгрузка готового APK r4ns0m-apk
+    # 5. Выгрузка готового APK r4ns0m-apk
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
