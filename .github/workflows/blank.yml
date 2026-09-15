@@ -1,7 +1,7 @@
 name: Android CI
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Жестко возвращает кнопку ручного запуска
 
 jobs:
   build:
@@ -10,219 +10,36 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # 1. Распаковка архива ради картинок и звуков из папки res/
     - name: Smart Unzip Project
       run: |
         ZIP_FILE=$(ls *.zip | head -n 1)
-        echo "Найдено архив: $ZIP_FILE"
         unzip -o "$ZIP_FILE" -d temp_unzip
-        
         if [ -f temp_unzip/gradlew ]; then
           mv temp_unzip/* .
         else
           INNER_DIR=$(ls temp_unzip | head -n 1)
-          echo "Обнаружена вложенная папка: $INNER_DIR"
           mv temp_unzip/$INNER_DIR/* . 2>/dev/null || mv temp_unzip/$INNER_DIR/.* . 2>/dev/null || true
           mv temp_unzip/$INNER_DIR/* . || true
         fi
         rm -rf temp_unzip
 
-    # 2. ЖЕСТКАЯ ПЕРЕЗАПИСЬ КОДА И СТРУКТУРЫ (Исправляет косяки синтаксиса)
-    - name: Force Clean and Write Working Code
-      run: |
-        echo "=== Создаем чистую кодовую базу ==="
-        mkdir -p app/src/main/java/com/fl0pp3r/r4ns0m
-        mkdir -p gradle/wrapper
+    - name: set up JDK 17
+      uses: actions/setup-java@v4 # Возвращаем v4, чтобы убрать конфликты версий сред
+      with:
+        java-version: '17'
+        distribution: 'temurin'
 
-        # ── ПЕРЕЗАПИСЬ COINARCHIVEMANAGER ──
-        cat << 'EOF' > app/src/main/java/com/fl0pp3r/r4ns0m/CoinArchiveManager.kt
-        package com.fl0pp3r.r4ns0m
-        import android.content.Context
-        class CoinArchiveManager(private val context: Context) {
-            companion object {
-                const val COIN_COUNT = 0
-            }
-            suspend fun cleanupCoins() {
-                val prefs = context.getSharedPreferences("game_settings", Context.MODE_PRIVATE)
-                prefs.edit().putInt("saved_coins", 0).apply()
-            }
-        }
-        EOF
+    - name: Grant execute permission
+      run: chmod +x gradlew
 
-        # ── ПЕРЕЗАПИСЬ MAINACTIVITY ──
-        cat << 'EOF' > app/src/main/java/com/fl0pp3r/r4ns0m/MainActivity.kt
-        package com.fl0pp3r.r4ns0m
-        import android.content.Context
-        import android.content.Intent
-        import android.net.Uri
-        import android.os.Build
-        import android.os.Bundle
-        import android.provider.Settings
-        import android.widget.Button
-        import android.widget.RadioGroup
-        import android.widget.Switch
-        import android.widget.Toast
-        import androidx.appcompat.app.AppCompatActivity
+    - name: Build with Gradle
+      run: ./gradlew assembleDebug --no-daemon
 
-        class MainActivity : AppCompatActivity() {
-            override fun onCreate(savedInstanceState: Bundle?) {
-                super.onCreate(savedInstanceState)
-                val prefs = getSharedPreferences("game_settings", Context.MODE_PRIVATE)
-                val isFirstLaunch = prefs.getBoolean("is_first_launch", true)
-                val isA90Enabled = prefs.getBoolean("a90_enabled", true)
-
-                if (!checkOverlayPermission()) {
-                    requestOverlayPermission()
-                    return
-                }
-                if (!isA90Enabled) {
-                    initSettingsScreen(prefs)
-                    return
-                }
-                if (isFirstLaunch) {
-                    prefs.edit().putBoolean("is_first_launch", false).apply()
-                    startBackgroundGameService()
-                    finish() 
-                } else {
-                    initSettingsScreen(prefs)
-                }
-            }
-
-            private fun checkOverlayPermission(): Boolean {
-                return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    Settings.canDrawOverlays(this)
-                } else {
-                    true 
-                }
-            }
-
-            private fun requestOverlayPermission() {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    Toast.makeText(this, "Разрешите отображение поверх окон!", Toast.LENGTH_LONG).show()
-                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-                    startActivity(intent)
-                    finish() 
-                }
-            }
-
-            private fun initSettingsScreen(prefs: android.content.SharedPreferences) {
-                setContentView(R.layout.activity_main)
-                val switchA90 = findViewById<Switch>(R.id.switch_a90)
-                val radioGroupMode = findViewById<RadioGroup>(R.id.radio_group_mode)
-                val btnSave = findViewById<Button>(R.id.btn_save)
-
-                switchA90.isChecked = prefs.getBoolean("a90_enabled", true)
-                val isScreenMode = prefs.getBoolean("collect_on_screen", false)
-                radioGroupMode.check(if (isScreenMode) R.id.radio_screen else R.id.radio_gallery)
-
-                btnSave.setOnClickListener {
-                    val selectedModeId = radioGroupMode.checkedRadioButtonId
-                    val collectOnScreen = (selectedModeId == R.id.radio_screen)
-                    prefs.edit().apply {
-                        putBoolean("a90_enabled", switchA90.isChecked)
-                        putBoolean("collect_on_screen", collectOnScreen)
-                        apply()
-                    }
-                    val serviceIntent = Intent(this, GameBackgroundService::class.java).apply {
-                        putExtra("update_settings", true)
-                    }
-                    startService(serviceIntent)
-                    Toast.makeText(this, "Применено!", Toast.LENGTH_SHORT).show()
-                    finish()
-                }
-            }
-
-            private fun startBackgroundGameService() {
-                val intent = Intent(this, GameBackgroundService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
-            }
-        }
-        EOF
-
-        # ── ПЕРЕЗАПИСЬ GAMEBACKGROUNDSERVICE ──
-        cat << 'EOF' > app/src/main/java/com/fl0pp3r/r4ns0m/GameBackgroundService.kt
-        package com.fl0pp3r.r4ns0m
-        import android.app.*
-        import android.content.Context
-        import android.content.Intent
-        import android.graphics.Color
-        import android.graphics.PixelFormat
-        import android.media.MediaPlayer
-        import android.os.Build
-        import android.os.Handler
-        import android.os.IBinder
-        import android.os.Looper
-        import android.view.Gravity
-        import android.view.MotionEvent
-        import android.view.View
-        import android.view.WindowManager
-        import android.widget.*
-        import androidx.core.app.NotificationCompat
-        import kotlinx.coroutines.*
-        import kotlin.random.Random
-
-        class GameBackgroundService : Service() {
-            private lateinit var windowManager: WindowManager
-            private var overlayRoot: FrameLayout? = null
-            private lateinit var layoutParams: WindowManager.LayoutParams
-            private val handler = Handler(Looper.getMainLooper())
-            private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-            private lateinit var coinManager: CoinArchiveManager
-            private var mediaPlayer: MediaPlayer? = null
-            private var themePlayer: MediaPlayer? = null 
-
-            private var characterView  : ImageView?   = null  
-            private var panicView      : ImageView?   = null  
-            private var ransomWidget   : FrameLayout? = null  
-            private var widgetTimerText: TextView?    = null
-            private var blackScreenView: View?        = null  
-            private var progressContainer : FrameLayout? = null 
-            private var progressBarBg     : View?        = null 
-            private var progressBarFill   : View?        = null 
-            private var downloadText      : TextView?    = null 
-
-            private var isPanicMode  = false
-            private var strobeToggle = false
-            private var strobeCount  = 0
-            private var gameScore     = 500
-            private var gameActive    = false
-            private var isA90Enabled = true
-            private var collectModeOnScreen = false
-
-            private var countdownJob   : Job? = null
-
-            companion object {
-                private const val CHANNEL_ID      = "overlay_game_channel"
-                private const val NOTIFICATION_ID = 1
-                private const val CHARACTER_SPAWN_INTERVAL = 30_000L
-                private const val CHARACTER_HIDE_DELAY     =  2_000L
-                private const val PANIC_TOTAL_DURATION     =  1_000L
-                private const val STROBE_FRAME_INTERVAL    =    150L
-                val TOTAL_STROBE_FRAMES = (PANIC_TOTAL_DURATION / STROBE_FRAME_INTERVAL).toInt()
-                const val NORMAL_FLAGS = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                const val PANIC_FLAGS = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-
-                val GAME_IMAGE_ASSETS = intArrayOf(
-                    R.drawable.image1, R.drawable.image2, R.drawable.image3,
-                    R.drawable.image4, R.drawable.image5, R.drawable.image6
-                )
-            }
-
-            private val spawnRunnable = object : Runnable {
-                override fun run() {
-                    if (isA90Enabled && !isPanicMode && !gameActive) spawnCharacter()
-                    handler.postDelayed(this, CHARACTER_SPAWN_INTERVAL)
-                }
-            }
-            private val hideCharacterRunnable = Runnable { characterView?.visibility = View.INVISIBLE }
-            private val strobeRunnable = object : Runnable {
-                override fun run() {
-                    if (strobeCount >= TOTAL_STROBE_FRAMES) { endPanicMode(); return }
-                    panicView?.setImageResource(if (strobeToggle) R.drawable.ransom_face_a else R.drawable.ransom_face_b)
-                    strobeToggle = !strobeToggle
-                    strobeCount++
-                    handler.postDelayed(this, STROBE_FRAME_INTERVAL)
-                }
-            }
-
-Используйте код с осторожностью.override fun onCreate() {super.onCreate()coinManager = CoinArchiveManager(this)loadPersistentSettings()startForegroundWithNotification()windowManager = getSystemService(WINDOW_SERVICE) as WindowManagercreateOverlay()handler.postDelayed(spawnRunnable, CHARACTER_SPAWN_INTERVAL)}override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {intent?.let { if (it.hasExtra("update_settings")) loadPersistentSettings() }return START_STICKY}private fun loadPersistentSettings() {val prefs = getSharedPreferences("game_settings", Context.MODE_PRIVATE)isA90Enabled = prefs.getBoolean("a90_enabled", true)collectModeOnScreen = prefs.getBoolean("collect_on_screen", false)}override fun onDestroy() {super.onDestroy()handler.removeCallbacksAndMessages(null)countdownJob?.cancel()releaseAudio()stopThemeTrack()serviceScope.launch { coinManager.cleanupCoins() }serviceScope.cancel()overlayRoot?.let { runCatching { windowManager.removeView(it) } }}override fun onBind(intent: Intent?): IBinder? = nullprivate fun startForegroundWithNotification() {if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {val channel = NotificationChannel(CHANNEL_ID, "Overlay Game", NotificationManager.IMPORTANCE_LOW)getSystemService(NotificationManager::class.java).createNotificationChannel(channel)}val notification = NotificationCompat.Builder(this, CHANNEL_ID).setContentTitle("Игра-виджет активна").setContentText("Наблюдай...").setSmallIcon(android.R.drawable.ic_dialog_info).build()startForeground(NOTIFICATION_ID, notification)}private fun createOverlay() {layoutParams = WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else 2003,NORMAL_FLAGS, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START }overlayRoot = FrameLayout(this).apply { setBackgroundColor(Color.TRANSPARENT) }blackScreenView = View(this).apply { setBackgroundColor(Color.BLACK); visibility = View.GONE; setOnTouchListener { _, _ -> true } }progressContainer = FrameLayout(this).apply {setBackgroundColor(Color.parseColor("#33FF0000")); visibility = View.GONE; setOnTouchListener { _, _ -> true }val centerBox = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }downloadText = TextView(context).apply { text = "DOWNLOADING"; textColor = Color.WHITE; textSize = 22f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 30) }progressBarBg = FrameLayout(context).apply { setBackgroundColor(Color.WHITE) }progressBarFill = View(context).apply { setBackgroundColor(Color.GREEN) }progressBarBg?.addView(progressBarFill, FrameLayout.LayoutParams(0, FrameLayout.LayoutParams.MATCH_PARENT))centerBox.addView(downloadText); centerBox.addView(progressBarBg, LinearLayout.LayoutParams(600, 40).apply { gravity = Gravity.CENTER })addView(centerBox, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.CENTER })}ransomWidget = FrameLayout(this).apply {setBackgroundColor(Color.parseColor("#AA000000")); visibility = View.GONE; setOnTouchListener { _, _ -> true }val contentLayout = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setBackgroundColor(Color.parseColor("#1F0000")); setPadding(60, 60, 60, 60) }widgetTimerText = TextView(context).apply { text = "01:30"; textColor = Color.RED; textSize = 28f; setPadding(0, 0, 0, 20) }val alertText = TextView(context).apply { text = "SYSTEM ENCRYPTED\nREQUIRED: 500 COINS"; textColor = Color.WHITE; textSize = 15f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 40) }val payButton = Button(context).apply { text = "PAY RANSOM"; backgroundTintList = android.content.res.ColorStateList.valueOf(Color.RED); textColor = Color.WHITE; setOnClickListener { onRansomSuccessPaid() } }contentLayout.addView(widgetTimerText); contentLayout.addView(alertText); contentLayout.addView(payButton)addView(contentLayout, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.CENTER })}panicView = ImageView(this).apply { setImageResource(R.drawable.ransom_face_a); scaleType = ImageView.ScaleType.FIT_XY; visibility = View.INVISIBLE }characterView = ImageView(this).apply {setImageResource(GAME_IMAGE_ASSETS[0]); visibility = View.INVISIBLEsetOnClickListener { if (collectModeOnScreen) { gameScore += 50; visibility = View.INVISIBLE; handler.removeCallbacks(hideCharacterRunnable) } }}overlayRoot!!.apply { addView(ransomWidget); addView(progressContainer); addView(panicView); addView(characterView) }windowManager.addView(overlayRoot, layoutParams)}private fun spawnCharacter() {if (!isA90Enabled) returnisPanicMode = true; strobeCount = 0executeAudioTrack(R.raw.ransom_exe_warning)val width = windowManager.defaultDisplay.width - 200val height = windowManager.defaultDisplay.height - 200characterView?.translationX = Random.nextInt(0, maxOf(1, width)).toFloat()characterView?.translationY = Random.nextInt(0, maxOf(1, height)).toFloat()panicView?.visibility = View.VISIBLE; characterView?.visibility = View.VISIBLEhandler.post(strobeRunnable); handler.postDelayed(hideCharacterRunnable, CHARACTER_HIDE_DELAY)layoutParams.flags = PANIC_FLAGS; runCatching { windowManager.updateViewLayout(overlayRoot, layoutParams) }overlayRoot?.setOnTouchListener { _, event -> if (event.action == MotionEvent.ACTION_DOWN || event.action == MotionEvent.ACTION_MOVE) onPlayerFailedA90(); true }}private fun onPlayerFailedA90() {handler.removeCallbacks(strobeRunnable); handler.removeCallbacks(hideCharacterRunnable)characterView?.visibility = View.INVISIBLE; panicView?.visibility = View.INVISIBLEexecuteAudioTrack(R.raw.doors_archives_sfx_ransom_attack)progressContainer?.visibility = View.VISIBLE; progressContainer?.alpha = 1.0fprogressBarFill?.layoutParams?.width = 0; progressBarFill?.requestLayout()val totalDuration = 2000L; val interval = 50L; val totalSteps = totalDuration / intervalhandler.post(object : Runnable {var step = 0override fun run() {if (step >= totalSteps) { fadeOutLoadingAndStartGame(); return }step++progressBarFill?.layoutParams?.width = (600 * (step.toFloat() / totalSteps)).toInt()progressBarFill?.requestLayout()val shakeX = Random.nextInt(-6, 7).toFloat(); val shakeY = Random.nextInt(-4, 5).toFloat()progressBarBg?.translationX = shakeX; progressBarBg?.translationY = shakeY; downloadText?.translationX = shakeXprogressBarFill?.setBackgroundColor(if (Random.nextInt(0, 4) == 0) Color.RED else Color.GREEN)handler.postDelayed(this, interval)}})}private fun fadeOutLoadingAndStartGame() {progressBarBg?.translationX = 0f; progressBarBg?.translationY = 0f; downloadText?.translationX = 0f; progressBarFill?.setBackgroundColor(Color.GREEN)var alphaVal = 1.0fhandler.post(object : Runnable {override fun run() {alphaVal -= 0.1fif (alphaVal <= 0f) { progressContainer?.visibility = View.GONE; startRansomWidgetGame(); return }progressContainer?.alpha = alphaValhandler.postDelayed(this, 50L)}})}private fun startRansomWidgetGame() {gameActive = true; overlayRoot?.setOnTouchListener(null)layoutParams.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCHrunCatching { windowManager.updateViewLayout(overlayRoot, layoutParams) }ransomWidget?.visibility = View.VISIBLEstartThemeTrack(R.raw.ransom_theme)startRansomCountdown()}private fun startRansomCountdown() {var timeLeft = 90countdownJob = serviceScope.launch(Dispatchers.Main) {while (timeLeft > 0 && gameActive) {widgetTimerText?.text = String.format("%02d:%02d", timeLeft / 60, timeLeft % 60)if (gameScore >= 500) { onRansomSuccessPaid(); return@launch }delay(1000L); timeLeft--}if (gameActive) onRansomDefeatTimeout()}}private fun onRansomSuccessPaid() { stopThemeTrack(); executeAudioTrack(R.raw.win); Toast.makeText(this, "Выкуп принят!", Toast.LENGTH_SHORT).show(); resetToNormalState() }private fun onRansomDefeatTimeout() {stopThemeTrack(); executeAudioTrack(R.raw.ransom_exe_jumpscare)blackScreenView?.visibility = View.VISIBLE; layoutParams.flags = PANIC_FLAGS; runCatching { windowManager.updateViewLayout(overlayRoot, layoutParams) }serviceScope.launch { coinManager.cleanupCoins() }handler.postDelayed({ blackScreenView?.visibility = View.GONE; resetToNormalState() }, 3000L)}private fun resetToNormalState() { gameActive = false; countdownJob?.cancel(); ransomWidget?.visibility = View.GONE; endPanicMode() }private fun endPanicMode() { isPanicMode = false; panicView?.visibility = View.INVISIBLE; overlayRoot?.setOnTouchListener(null); layoutParams.flags = NORMAL_FLAGS; runCatching { windowManager.updateViewLayout(overlayRoot, layoutParams) } }private fun executeAudioTrack(audioResId: Int) {try {mediaPlayer?.stop(); mediaPlayer?.release()mediaPlayer = MediaPlayer.create(this, audioResId).apply { start(); setOnCompletionListener { releaseAudio() } }} catch (e: Exception) { e.printStackTrace() }}private fun startThemeTrack(audioResId: Int) {try { themePlayer?.release(); themePlayer = MediaPlayer.create(this, audioResId).apply { start() } } catch (e: Exception) { e.printStackTrace() }}private fun stopThemeTrack() { themePlayer?.stop(); themePlayer?.release(); themePlayer = null }private fun releaseAudio() { mediaPlayer?.release(); mediaPlayer = null }}EOF# ── СБОРКА СИСТЕМНЫХ КОНФИГУРАЦИЙ GRADLE ──cat < gradle/wrapper/gradle-wrapper.propertiesdistributionBase=GRADLE_USER_HOMEdistributionPath=wrapper/distszipStoreBase=GRADLE_USER_HOMEzipStorePath=wrapper/distsdistributionUrl=gradle.orgEOFcat < build.gradlebuildscript {repositories { google(); mavenCentral() }dependencies {classpath 'com.android.tools.build:gradle:8.2.2'classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22"}}allprojects { repositories { google(); mavenCentral() } }EOFcat < settings.gradleinclude ':app'EOFcat < app/build.gradleapply plugin: 'com.android.application'apply plugin: 'kotlin-andr
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: r4ns0m-apk
+        path: |
+          app/build/outputs/apk/debug/app-debug.apk
+          **/build/outputs/apk/debug/*.apk
+          
