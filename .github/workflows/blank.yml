@@ -1,4 +1,4 @@
-name: Android CI
+          name: Android CI
 
 on:
   workflow_dispatch:
@@ -8,7 +8,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    # Обновлено до v4 (поддержка Node 24)
+    - uses: actions/checkout@v4 
 
     # 1. Распаковка архива и исправление структуры
     - name: Smart Unzip Project
@@ -27,7 +28,7 @@ jobs:
         fi
         rm -rf temp_unzip
 
-    # 2. ИСПРАВЛЕНИЕ НАЗВАНИЙ ФАЙЛОВ (Наша Галина без опечаток)
+    # 2. ИСПРАВЛЕНИЕ НАЗВАНИЙ ФАЙЛОВ
     - name: Sanitize Resource Filenames
       run: |
         echo "=== Проверяем и исправляем имена файлов в ресурсах ==="
@@ -37,7 +38,6 @@ jobs:
           ext="${base##*.}"
           name="${base%.*}"
           
-          # Заменяем дефисы и точки в имени на нижнее подчеркивание, переводим в нижний регистр (lower)
           clean_name=$(echo "$name" | tr '-' '_' | tr '.' '_' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_')
           new_file="$dir/${clean_name}.${ext}"
           
@@ -47,8 +47,9 @@ jobs:
           fi
         done
 
+    # МИГРАЦИЯ НА v5 (Исправляет ошибку Deprecated Node 20)
     - name: set up JDK 17
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@v5
       with:
         java-version: '17'
         distribution: 'temurin'
@@ -61,7 +62,7 @@ jobs:
     - name: Build with Gradle
       run: ./gradlew assembleDebug
 
-    # 4. Выгрузка готового APK (С твоим кастомным именем r4ns0m-apk)
+    # 4. Выгрузка готового APK r4ns0m-apk
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
