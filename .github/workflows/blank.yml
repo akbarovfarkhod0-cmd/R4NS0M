@@ -10,7 +10,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # 1. Умная распаковка архива
+    # 1. Распаковка архива
     - name: Smart Unzip Project
       run: |
         ZIP_FILE=$(ls *.zip | head -n 1)
@@ -27,26 +27,77 @@ jobs:
         fi
         rm -rf temp_unzip
 
-    # 2. ПРИНУДИТЕЛЬНОЕ ИСПРАВЛЕНИЕ ВЕРСИЙ GRADLE (Убирает конфликты IDE)
-    - name: Force Fix Gradle Configurations
+    # 2. ЖЕСТКАЯ ПЕРЕЗАПИСЬ СИСТЕМНЫХ КОНФИГУРАЦИЙ (Чистим косяки импорта)
+    - name: Force Clean Rebuild Environment
       run: |
-        echo "=== Принудительно выставляем рабочие версии Gradle ==="
+        echo "=== Создаем чистые файлы сборки ==="
         mkdir -p gradle/wrapper
+        
+        # Перезаписываем свойства gradle
         cat <<EOF > gradle/wrapper/gradle-wrapper.properties
         distributionBase=GRADLE_USER_HOME
         distributionPath=wrapper/dists
         zipStoreBase=GRADLE_USER_HOME
         zipStorePath=wrapper/dists
-        distributionUrl=https\://services.gradle.org/distributions/gradle-8.5-all.zip
+        distributionUrl=https\://services.gradle.org/distributions/gradle-8.2-all.zip
         EOF
-        
-        # Обновляем build.gradle, чтобы он не требовал ломаную версию 8.13
-        find . -name "build.gradle" -type f | while read -r f; do
-          sed -i 's/com.android.tools.build:gradle:8.13/com.android.tools.build:gradle:8.2.2/g' "$f" || true
-          sed -i 's/com.android.application:8.13/com.android.application:8.2.2/g' "$f" || true
-        done
 
-    # 3. Санитария названий файлов ресурсов
+        # Перезаписываем корневой build.gradle
+        cat <<EOF > build.gradle
+        buildscript {
+            repositories {
+                google()
+                mavenCentral()
+            }
+            dependencies {
+                classpath 'com.android.tools.build:gradle:8.2.2'
+                classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22"
+            }
+        }
+        allprojects {
+            repositories {
+                google()
+                mavenCentral()
+            }
+        }
+        EOF
+
+        # Перезаписываем корневой settings.gradle
+        cat <<EOF > settings.gradle
+        include ':app'
+        EOF
+
+        # Перезаписываем внутренний app/build.gradle под стабильную версию
+        cat <<EOF > app/build.gradle
+        apply plugin: 'com.android.application'
+        apply plugin: 'kotlin-android'
+
+        android {
+            compileSdk 34
+            defaultConfig {
+                applicationId "com.fl0pp3r.r4ns0m"
+                minSdk 26
+                targetSdk 34
+                versionCode 1
+                versionName "1.0"
+            }
+            buildTypes {
+                release {
+                    minifyEnabled false
+                }
+            }
+            namespace "com.fl0pp3r.r4ns0m"
+        }
+
+        dependencies {
+            implementation 'androidx.core:core-ktx:1.12.0'
+            implementation 'androidx.appcompat:appcompat:1.6.1'
+            implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
+            implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+        }
+        EOF
+
+    # 3. Санитария названий ресурсов
     - name: Sanitize Resource Filenames
       run: |
         echo "=== Авто-исправление имен файлов ==="
@@ -71,7 +122,7 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    # 4. Сборка приложения на стабильной конфигурации
+    # 4. Сборка приложения
     - name: Build with Gradle
       run: ./gradlew assembleDebug --no-daemon
 
