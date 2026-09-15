@@ -8,9 +8,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # Обновлено до v4 (полная совместимость с Node 24)
     - uses: actions/checkout@v4
 
-    # 1. Распаковка архива
+    # 1. Умная распаковка архива
     - name: Smart Unzip Project
       run: |
         ZIP_FILE=$(ls *.zip | head -n 1)
@@ -27,13 +28,20 @@ jobs:
         fi
         rm -rf temp_unzip
 
-    # 2. ЖЕСТКАЯ ПЕРЕЗАПИСЬ СИСТЕМНЫХ КОНФИГУРАЦИЙ (Чистим косяки импорта)
-    - name: Force Clean Rebuild Environment
+    # 2. АВТО-ИСПРАВЛЕНИЕ ОШИБОК КОДА KOTLIN И GRADLE
+    - name: Force Clean and Patch Code
       run: |
-        echo "=== Создаем чистые файлы сборки ==="
+        echo "=== Исправляем синтаксические ошибки в Kotlin-коде ==="
+        
+        # Находим файл сервиса и чиним ошибочную передачу массива в setImageResource
+        find . -name "GameBackgroundService.kt" -type f | while read -r f; do
+          sed -i 's/characterView?.setImageResource(GAME_IMAGE_ASSETS)/characterView?.setImageResource(R.drawable.image1)/g' "$f" || true
+          sed -i 's/characterView?.setImageResource(R.drawable.image1)/characterView?.setImageResource(GAME_IMAGE_ASSETS\[0\])/g' "$f" || true
+        done
+
+        echo "=== Перезаписываем конфигурацию сборщика ==="
         mkdir -p gradle/wrapper
         
-        # Перезаписываем свойства gradle
         cat <<EOF > gradle/wrapper/gradle-wrapper.properties
         distributionBase=GRADLE_USER_HOME
         distributionPath=wrapper/dists
@@ -42,32 +50,21 @@ jobs:
         distributionUrl=https\://services.gradle.org/distributions/gradle-8.2-all.zip
         EOF
 
-        # Перезаписываем корневой build.gradle
         cat <<EOF > build.gradle
         buildscript {
-            repositories {
-                google()
-                mavenCentral()
-            }
+            repositories { google(); mavenCentral() }
             dependencies {
                 classpath 'com.android.tools.build:gradle:8.2.2'
                 classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22"
             }
         }
-        allprojects {
-            repositories {
-                google()
-                mavenCentral()
-            }
-        }
+        allprojects { repositories { google(); mavenCentral() } }
         EOF
 
-        # Перезаписываем корневой settings.gradle
         cat <<EOF > settings.gradle
         include ':app'
         EOF
 
-        # Перезаписываем внутренний app/build.gradle под стабильную версию
         cat <<EOF > app/build.gradle
         apply plugin: 'com.android.application'
         apply plugin: 'kotlin-android'
@@ -81,11 +78,7 @@ jobs:
                 versionCode 1
                 versionName "1.0"
             }
-            buildTypes {
-                release {
-                    minifyEnabled false
-                }
-            }
+            buildTypes { release { minifyEnabled false } }
             namespace "com.fl0pp3r.r4ns0m"
         }
 
@@ -100,7 +93,6 @@ jobs:
     # 3. Санитария названий ресурсов
     - name: Sanitize Resource Filenames
       run: |
-        echo "=== Авто-исправление имен файлов ==="
         find app/src/main/res -type f | while read -r file; do
           dir=$(dirname "$file")
           base=$(basename "$file")
@@ -113,8 +105,9 @@ jobs:
           fi
         done
 
+    # Обновлено до v5 (Решает проблему устаревшего Node 20 на сервере)
     - name: set up JDK 17
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@v5
       with:
         java-version: '17'
         distribution: 'temurin'
