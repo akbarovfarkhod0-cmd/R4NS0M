@@ -10,14 +10,13 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # 1. Автоматический поиск папки внутри ZIP и распаковка
+    # 1. Распаковка архива и исправление структуры
     - name: Smart Unzip Project
       run: |
         ZIP_FILE=$(ls *.zip | head -n 1)
         echo "Найдено архив: $ZIP_FILE"
         unzip -o "$ZIP_FILE" -d temp_unzip
         
-        # Проверяем, есть ли внутри вложенная папка, и вытаскиваем всё в корень
         if [ -f temp_unzip/gradlew ]; then
           mv temp_unzip/* .
         else
@@ -27,9 +26,26 @@ jobs:
           mv temp_unzip/$INNER_DIR/* . || true
         fi
         rm -rf temp_unzip
-        
-        echo "=== Файлы в корне после умной распаковки ==="
-        ls -la
+
+    # 2. ИСПРАВЛЕНИЕ НАЗВАНИЙ ФАЙЛОВ (Наша Галина без опечаток)
+    - name: Sanitize Resource Filenames
+      run: |
+        echo "=== Проверяем и исправляем имена файлов в ресурсах ==="
+        find app/src/main/res -type f | while read -r file; do
+          dir=$(dirname "$file")
+          base=$(basename "$file")
+          ext="${base##*.}"
+          name="${base%.*}"
+          
+          # Заменяем дефисы и точки в имени на нижнее подчеркивание, переводим в нижний регистр (lower)
+          clean_name=$(echo "$name" | tr '-' '_' | tr '.' '_' | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_')
+          new_file="$dir/${clean_name}.${ext}"
+          
+          if [ "$file" != "$new_file" ]; then
+            echo "Переименовываем: $base -> ${clean_name}.${ext}"
+            mv "$file" "$new_file"
+          fi
+        done
 
     - name: set up JDK 17
       uses: actions/setup-java@v4
@@ -38,17 +54,14 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    # 2. Выдача прав на запуск компилятора
     - name: Grant execute permission for gradlew
-      run: |
-        chmod +x gradlew
-        corepack enable || true
+      run: chmod +x gradlew
 
-    # 3. Сама сборка отладочного APK
+    # 3. Сборка приложения
     - name: Build with Gradle
       run: ./gradlew assembleDebug
 
-    # 4. Выгрузка готового файла для скачивания
+    # 4. Выгрузка готового APK (С твоим кастомным именем r4ns0m-apk)
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
